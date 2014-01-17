@@ -41,8 +41,19 @@ unsigned long windowStartTime;
   double readF = 0.00;
 
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+/* ************************************************************** */
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
+// Data wire is plugged into port 2 on the Arduino
+#define ONE_WIRE_BUS 2
 
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+
+// Pass our oneWire reference to Dallas Temperature. 
+DallasTemperature sensors(&oneWire);
+/* ************************************************************** */
 
 void setup()
 {
@@ -55,30 +66,27 @@ void setup()
   Setpoint = 220.00;
 
   //tell the PID to range between 0 and the full window size
-  myPID.SetOutputLimits(0, WindowSize);
+  myPID.SetOutputLimits(-WindowSize, WindowSize);
 
   //turn the PID on
   myPID.SetMode(AUTOMATIC);
+  
+  sensors.begin();  
 }
 
 void loop()
 {
-  readTemps();          // run readTemps
-  runPID();
-}
+  sensors.requestTemperatures(); // Send the command to get temperatures
 
-double readTemps()  {
+  runPID();
+
+
+
   
 
-   readC = thermocouple.readCelsius();    // read thermocouple in Celsius
-   readF = thermocouple.readFarenheit();
-   
-   
-   if (isnan(readC)) {                      // if readC is not a number
-     lcd.setCursor(0,1);
-     lcd.println("TC ERR!");            // thermocouple error!!
-     Serial.print("THERMOCOUPLE ERROR!!!");
-   } else {                            //  otherwise
+   readC = sensors.getTempCByIndex(0);
+
+ 
      lcd.setCursor(0,0);
      //lcd.print("IT:");
      lcd.print("S:");
@@ -88,25 +96,16 @@ double readTemps()  {
      lcd.setCursor(9,0);
      lcd.print("F:");
      lcd.setCursor(11,0);
-     lcd.print(thermocouple.readFarenheit());    // lcd print Celsius Temp
-     Serial.print("IT= ");
-     Serial.println(thermocouple.readInternal());    // serial print Internal Temp
+     lcd.print(readC);    // lcd print Celsius Temp
+
+
      Serial.print("C= ");
-     Serial.print(thermocouple.readCelsius());      // serial print Celsius Temp
-     Serial.print("  F= ");
-     Serial.println(thermocouple.readFarenheit());    // serial print Farenheit temp
-     Serial.print("Error ");
-     Serial.println(thermocouple.readError());        // serial print Read Error Bits
-     
-     
-   }
+     Serial.print(readC);      // serial print Celsius Temp
    
 }
 
 void runPID()  {
-  // Input = analogRead(0);
-  double readTempF = thermocouple.readFarenheit();
-  Input = readTempF;
+  Input = readC;
   Serial.print("PID Input =");
   Serial.println(Input);
   myPID.Compute();
