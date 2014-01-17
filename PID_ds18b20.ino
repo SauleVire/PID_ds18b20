@@ -23,22 +23,19 @@
 
 //Define Variables we'll be connecting to
 double Setpoint, Input, Output;
-float Kp = 0.0; 
-float Ki = 0.0;
-float Kd = 0.0;
+//Define the aggressive and conservative Tuning Parameters
+double aggKp=4, aggKi=0.2, aggKd=1;
+double consKp=1, consKi=0.05, consKd=0.25;
 
-//Specify the links and initial tuning parameters
-PID myPID(&Input, &Output, &Setpoint,0.5,100,4, DIRECT);
+// Specify the links and initial tuning parameters
+// buvo taip:
+// PID myPID(&Input, &Output, &Setpoint,0.5,100,4, DIRECT);
+
+PID myPID(&Input, &Output, &Setpoint, consKp, consKi, consKd, DIRECT);
 
 int WindowSize = 5000;
 unsigned long windowStartTime;
 
-  int thermoDO = 11;              // MAX31855 Data
-  int thermoCS = 10;              // MAX31855 Chip Select
-  int thermoCLK = 9;              // MAX31855 Clock
-  
-  double readC = 0.00;
-  double readF = 0.00;
 
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 /* ************************************************************** */
@@ -46,7 +43,7 @@ LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 #include <DallasTemperature.h>
 
 // Data wire is plugged into port 2 on the Arduino
-#define ONE_WIRE_BUS 2
+#define ONE_WIRE_BUS 36
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -63,7 +60,7 @@ void setup()
   lcd.clear();                      // clear lcd
 
   //initialize the variables we're linked to
-  Setpoint = 220.00;
+  Setpoint = 25.00;
 
   //tell the PID to range between 0 and the full window size
   myPID.SetOutputLimits(-WindowSize, WindowSize);
@@ -71,41 +68,46 @@ void setup()
   //turn the PID on
   myPID.SetMode(AUTOMATIC);
   
-  sensors.begin();  
+  sensors.begin();
+sensors.requestTemperatures(); 
+Input = sensors.getTempCByIndex(0);
 }
 
 void loop()
 {
   sensors.requestTemperatures(); // Send the command to get temperatures
+Input = sensors.getTempCByIndex(0);
+
+  double gap = abs(Setpoint-Input); //distance away from setpoint
+  if(gap<10)
+  {  //we're close to setpoint, use conservative tuning parameters
+    myPID.SetTunings(consKp, consKi, consKd);
+  }
+  else
+  {
+     //we're far from setpoint, use aggressive tuning parameters
+     myPID.SetTunings(aggKp, aggKi, aggKd);
+  }
 
   runPID();
 
-
-
   
-
-   readC = sensors.getTempCByIndex(0);
-
  
      lcd.setCursor(0,0);
-     //lcd.print("IT:");
-     lcd.print("S:");
-     lcd.setCursor(2,0);
-    // lcd.print(thermocouple.readInternal());    // lcd print Internal Temp
+     lcd.print("Set:");
      lcd.print(Setpoint);
      lcd.setCursor(9,0);
-     lcd.print("F:");
-     lcd.setCursor(11,0);
-     lcd.print(readC);    // lcd print Celsius Temp
+     lcd.print("C:");
+     lcd.print(Input);    // lcd print Celsius Temp
 
 
      Serial.print("C= ");
-     Serial.print(readC);      // serial print Celsius Temp
+     Serial.print(Input);      // serial print Celsius Temp
    
 }
 
 void runPID()  {
-  Input = readC;
+
   Serial.print("PID Input =");
   Serial.println(Input);
   myPID.Compute();
