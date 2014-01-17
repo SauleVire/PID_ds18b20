@@ -18,8 +18,8 @@
 
 
 #include <PID_v1.h>
-#define RelayPin 4
-
+#define RelayPinOpen 4
+#define RelayPinClose 5
 
 //Define Variables we'll be connecting to
 double Setpoint, Input, Output;
@@ -118,8 +118,28 @@ void runPID()  {
   { //time to shift the Relay Window
     windowStartTime += WindowSize;
   }
-  if(Output > now - windowStartTime) digitalWrite(RelayPin,HIGH);
-  else digitalWrite(RelayPin,LOW);
+if(Output==0)
+
+{ //pid thinks we shouldn't activate either relay. do nothing
+digitalWrite(RelayPinOpen,HIGH);
+digitalWrite(RelayPinClose,HIGH);
+}
+else if(Output>0)
+
+{ // pid thinks we should be activating relay1 for a time proportional 
+  // to the value of output
+if(Output > millis() - windowStartTime) digitalWrite(RelayPinOpen,LOW);
+
+else digitalWrite(RelayPinOpen,HIGH);
+digitalWrite(RelayPinClose,LOW);
+}
+else // pid thinks we should be activating relay2 for a time proportional 
+     // to the value of -1 * output
+{
+if(-Output > millis() - windowStartTime) digitalWrite(RelayPinClose,LOW);
+else digitalWrite(RelayPinClose,HIGH);
+digitalWrite(RelayPinOpen,LOW);
+}
 }
 
 
