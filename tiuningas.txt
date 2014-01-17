@@ -1,0 +1,419 @@
+//PID exp http://arduino.cc/playground/Code/PIDLibraryRelayOutputExample
+//PID autotune exp http://playground.arduino.cc/Code/PIDAutotuneLibrary
+#include <PID_v1.h>
+#include <LiquidCrystal.h>
+#include <math.h>
+
+//DS18B20 uses onewire protocol; need 5k pullup
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+//uses PID auto tune lib
+#include <PID_AutoTune_v0.h>
+
+
+#define thermoPin A2    // A5 for LM35 etc
+#define ssrPin 3       //D3 for SSR IC
+#define setupBtn A0 //setupBtn
+#define upBtn A3 // upBtn
+#define downBtn A4 //downBtn
+#define pinR 11 //using D11 for R
+#define pinG 10 //using D10 for G
+#define pinB 9 //using D9 for B
+
+// default=Data wire is plugged into pin 2 on the Arduino
+#define ONE_WIRE_BUS A1
+ 
+// Setup a oneWire instance to communicate with any OneWire devices 
+// (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+ 
+// Pass our oneWire reference to Dallas Temperature.
+DallasTemperature ds18B20(&oneWire);
+
+//Define Variables we'll be using for PID
+double Setpoint = 0.0;
+double Input = 0.0;
+double Output = 0.0;
+int test1 = 1;
+double gain = 5.6;
+//float thermo = 10000; // thermo-resistance nominal val
+//float padR = 9940; //pull-up resistor value, aka voltage divider style
+
+//pid auto tune 
+byte ATuneModeRemember=2;
+//double input=80, output=50, setpoint=180;
+double kp=2,ki=0.5,kd=2;
+
+double kpmodel=1.5, taup=100, theta[50];
+double outputStart=5;
+double aTuneStep=50, aTuneNoise=1, aTuneStartValue=100;
+unsigned int aTuneLookBack=20;
+
+boolean tuning = false;
+unsigned long  modelTime, serialTime;
+//Specify the links and initial tuning parameters
+//PID myPID(&Input, &Output, &Setpoint,2,5,1, DIRECT);//DIRECT=output decrease to cool down
+//PID myPID(&Input, &Output, &Setpoint,2,0.5,2, DIRECT);//result autotune
+PID myPID(&Input, &Output, &Setpoint,kp,ki,kd, DIRECT);//using autotune
+PID_ATune aTune(&Input, &Output);
+
+LiquidCrystal lcd(13, 12,7, 6, 5, 4);//LCD pin
+int WindowSize = 5000; //tuning period
+unsigned long windowStartTime;
+unsigned long lastUpdate = 0;
+unsigned long start = 0;
+//===methods===
+float readThermo(int rawADC) {//input pin#
+  long resistance=0.0;  
+  float temp=0.0; 
+  float temp1=0.0; 
+ float val=0.0;
+  //using pull-up resistor
+  //Resistance=((1024 * pad / rawADC) - pad); 
+  //Temp = log(resistance); // Saving the Log(resistance) so not to calculate it 4 times later
+  //Temp = 1 / (0.001129148 + (0.000234125 * Temp) + (0.0000000876741 * Temp * Temp * Temp));
+  //Temp = Temp - 273.15;  // convert Kelvin                      
+  // Temp = (Temp * 9.0)/ 5.0 + 32.0; //Convert to Fahrenheit
+  
+  //using LM35
+  //val = analogRead(rawADC);          //read the value of sensor
+ //temp = (5.0*val*100/1024);
+//temp = (3.3*val*100/1024);  //convert voltage to temperature
+  //temp1 = (val)*(5000/1024);
+  //temp = (temp1-500)/10;
+  
+  //using thermocouple
+  //temp = 3.025/(3.3/1024);//k type
+   //temp = val+gain;//k type gain * 100 + offset
+   //temp = val;//debug
+   
+   //using ds18B20
+   ds18B20.requestTemperatures();
+   val = ds18B20.getTempCByIndex(0);
+   temp = val;
+      return temp; // Return the Temperature in degC
+}
+
+void setupMenu(){ // ky changed the whole function
+  int count = 0;
+  int current = 0;
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Settings");
+  while (analogRead(setupBtn) < 127);
+  for (;;)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Settings");
+    lcd.setCursor(0, 1);
+    if (current == 0)
+      lcd.print("setPoint");
+    else if (current == 1)
+      lcd.print("Preset  ");
+    else if (current == 2)
+      lcd.print("Apply   ");
+    if (analogRead(upBtn)<127)
+    {
+      while (analogRead(upBtn)<127);
+      if (++current == 3)
+        current = 0;
+    }
+    else if (analogRead(downBtn)<127)
+    {
+      while (analogRead(downBtn)<127);
+      if (current == 0)
+        current = 2;
+      else
+        --current;
+    }
+    else if (analogRead(setupBtn)<127)
+    {
+      while (analogRead(setupBtn)<127);
+      switch (current)
+      {
+        case 0:
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Current setPoint");
+          lcd.setCursor(0, 1);
+          lcd.print(Setpoint,1);          
+          while (analogRead(setupBtn)>=127)
+          {
+            if(analogRead(upBtn)<127) //increase setpoint
+            {
+              Setpoint = Setpoint + 0.1;
+              lcd.setCursor(0, 1);
+              lcd.print(Setpoint,1);
+              
+              if (Setpoint == 100){
+                lcd.setCursor(0, 1);
+                lcd.print("Maximum 100");
+                Setpoint = 100.0;
+              }
+              delay(100);
+            }
+            else if(analogRead(downBtn)<127){
+              Setpoint = Setpoint - 0.1;
+              lcd.setCursor(0, 1);
+              lcd.print(Setpoint,1);
+              
+              if (Setpoint == 0){
+                lcd.setCursor(0, 1);
+                lcd.print("Minimum 0");
+                Setpoint = 0.0;
+              }
+              delay(100);
+            }
+          }
+          while (analogRead(setupBtn)<127);
+          break;
+        case 1:
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Preset");
+          while (analogRead(setupBtn)>=127)
+          {
+            lcd.setCursor(0, 1);
+            if (count == 0)
+              lcd.print("beef   ");
+            else if (count == 1)
+              lcd.print("chicken");
+            if (analogRead(upBtn)<127)
+            {
+              while (analogRead(upBtn)<127);
+              if (++count == 2)
+                count = 0;
+            }
+            else if (analogRead(downBtn)<127)
+            {
+              while (analogRead(downBtn)<127);
+              if (count == 0)
+                count = 1;
+              else
+                --count;
+            }
+          }
+          while (analogRead(setupBtn)<127);
+          break;
+        case 2:
+          while (analogRead(setupBtn)<127);
+          return;
+        default:
+          break;
+      }
+    }
+  }
+}
+void updateLCD(float current)
+{
+  lcd.setCursor(0, 0);
+  lcd.print("Current temp deg");
+  lcd.setCursor(0, 1);
+  lcd.print(current,1);
+  lcd.print("                ");
+}
+//====setup=========
+void setup()
+{
+  windowStartTime = millis();
+
+
+  //Serial.begin(9600);//use by 1 wire to debug
+  // Start up the library for ds18B20
+  ds18B20.begin();
+  
+  //initialize the variables needed
+  Setpoint = 55; //the temp required set
+
+  //tell the PID to range between 0 and the full window size
+  myPID.SetOutputLimits(0, WindowSize);
+
+  //turn the PID on
+  myPID.SetMode(AUTOMATIC);//MANUAL = off
+  
+  //set LCD
+   pinMode(13, OUTPUT);
+   
+  // Serial.begin(115200);
+  // set up the LCD's number of columns and rows: 
+  lcd.begin(16, 2);
+  // Print a message to the LCD.
+  lcd.print("Welcome DIY Sous Vide");
+  delay(2000);
+  float temp = readThermo(thermoPin);// read LM35
+  updateLCD(temp);
+
+  //auto tune
+  if(tuning)
+  {
+    tuning=false;
+    changeAutoTune();
+    tuning=true;
+  }
+  
+  serialTime = 0;
+  Serial.begin(9600);
+
+  
+}
+
+void loop()
+{
+  float temp = readThermo(thermoPin);// read LM35
+  
+  Input = (double)temp;//input to PID
+  
+  //use autotune
+  if(tuning)
+  {
+    Serial.println("tuning is true");
+    byte val = (aTune.Runtime());
+    if (val!=0)
+    {
+      tuning = false;
+      Serial.println("tuning soon");
+    }
+/*    else if (val > 0){
+     Serial.println("still need tuning");
+    }
+    
+    else if (val < 0){
+     Serial.println("-1 still need tuning");
+    }
+*/    
+    if(!tuning)
+    { //we're done, set the tuning parameters
+      kp = aTune.GetKp();
+      ki = aTune.GetKi();
+      kd = aTune.GetKd();
+      myPID.SetTunings(kp,ki,kd);
+      AutoTuneHelper(false);
+	  Serial.println("   ");
+      Serial.println("TUNING COMPLETED! XXX");
+      Serial.print("Kp Value = ");
+      Serial.print(kp);
+      Serial.print(" Ki Value = ");
+      Serial.print(ki);
+      Serial.print(" Kd Value = ");
+      Serial.print(kd);
+      Serial.println("   ");
+    }
+  }
+  else myPID.Compute();
+  
+  //myPID.Compute();//no autotune
+
+ //PID calc then control the SSR 
+  /************************************************
+   * turn the output pin on/off based on pid output
+   ************************************************/
+  unsigned long now = millis();
+  if(now - lastUpdate >= 1500)
+  {
+    updateLCD(temp);
+    lastUpdate = now;
+  }
+  if(now - windowStartTime>WindowSize)
+  { //time to shift the Relay Window
+    windowStartTime += WindowSize;
+  }
+  
+  if(Output > now - windowStartTime)
+  {
+  digitalWrite(ssrPin,HIGH);// ssrPin 1 to turn off
+  }
+  else digitalWrite(ssrPin,LOW);// ssrPin 0 to turn off
+
+  //auto tune send-receive with processing if it's time
+  if(millis()>serialTime)
+  {
+    SerialReceive();
+    SerialSend();
+    serialTime+=500;
+  }
+
+  //setup button 
+  if(analogRead(setupBtn)<127){//setup button pressed for 3 seconds or more
+    if (start == 0)
+      start = now;
+    lcd.setCursor(0, 0);
+    lcd.print("Entering...     ");
+    lcd.setCursor(0, 1);
+    lcd.print("please hold 2sec");
+    if (now-start > 2000)
+    {
+      start = 0;
+      setupMenu();
+    }
+  }
+  else
+    start = 0;
+  
+}//end loop
+//auto tune func call
+void changeAutoTune()
+{
+ if(!tuning)
+  {
+    //Set the output to the desired starting frequency.
+    Output=aTuneStartValue;
+    aTune.SetNoiseBand(aTuneNoise);
+    aTune.SetOutputStep(aTuneStep);
+    aTune.SetLookbackSec((int)aTuneLookBack);
+    AutoTuneHelper(true);
+    tuning = true;
+	
+  }
+  else
+  { //cancel autotune
+    aTune.Cancel();
+    tuning = false;
+    AutoTuneHelper(false);
+  }
+}
+
+void AutoTuneHelper(boolean start)
+{
+  if(start)
+    ATuneModeRemember = myPID.GetMode();
+  else
+    myPID.SetMode(ATuneModeRemember);
+}
+
+
+void SerialSend()
+{
+  Serial.print("setpoint: ");Serial.print(Setpoint); Serial.print(" ");
+  Serial.print("input: ");Serial.print(Input); Serial.print(" ");
+  Serial.print("output: ");Serial.print(Output); Serial.print(" ");
+  if(tuning){
+    Serial.println("tuning mode");
+  } else {
+    Serial.print("kp: ");Serial.print(myPID.GetKp());Serial.print(" ");
+    Serial.print("ki: ");Serial.print(myPID.GetKi());Serial.print(" ");
+    Serial.print("kd: ");Serial.print(myPID.GetKd());Serial.println();
+  }
+}
+
+void SerialReceive()
+{
+  if(Serial.available())
+  {
+   char b = Serial.read(); 
+   Serial.flush(); 
+   if((b=='1' && !tuning) || (b!='1' && tuning))changeAutoTune();
+  }
+}
+
+void DoModel()
+{
+  //cycle the dead time
+  for(byte i=0;i<49;i++)
+  {
+    theta[i] = theta[i+1];
+  }
+  //compute the input
+  Input = (kpmodel / taup) *(theta[0]-outputStart) + Input*(1-1/taup) + ((float)random(-10,10))/100;
+
+}
