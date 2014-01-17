@@ -37,7 +37,7 @@ int WindowSize = 5000;
 unsigned long windowStartTime;
 
 
-LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+LiquidCrystal lcd(26, 24, 22, 23, 25, 27, 29);
 /* ************************************************************** */
 #include <OneWire.h>
 #include <DallasTemperature.h>
